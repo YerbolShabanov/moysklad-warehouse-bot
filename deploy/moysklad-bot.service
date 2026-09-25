@@ -1,0 +1,45 @@
+[Unit]
+Description=МойСклад — телеграм-бот складовщика
+After=network-online.target
+Wants=network-online.target
+# Второй экземпляр не должен подняться поверх первого: Telegram отдаёт
+# Conflict на getUpdates, если polling ведут два процесса одновременно.
+# systemd сам это гарантирует (один юнит = один запуск), но не полагаемся
+# на параллельный запуск через любой другой механизм (cron и т.п.).
+# Если падает подряд — не долбим бесконечно, останавливаемся и ждём разбора.
+# (Директива должна жить в [Unit], а не в [Service] — иначе systemd её тихо игнорирует.)
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=moysklad-bot
+Group=moysklad-bot
+WorkingDirectory=/opt/moysklad-bot
+EnvironmentFile=/opt/moysklad-bot/.env
+ExecStart=/opt/moysklad-bot/.venv/bin/python main.py
+
+# Автовосстановление после сбоя (сеть, временная недоступность API и т.п.)
+Restart=on-failure
+RestartSec=5
+
+# Сервер общий с сайтом (nginx + pm2, 1 ГБ RAM) — бот не должен претендовать
+# на память сверх меры. В норме процесс занимает ~40 МБ.
+MemoryHigh=256M
+MemoryMax=384M
+
+# Логи уходят в journald: смотреть `journalctl -u moysklad-bot -f`
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=moysklad-bot
+
+# Небольшая защита: процесс не должен ничего писать вне своей директории,
+# кроме state.json/batch_state.json, которые лежат тут же.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/moysklad-bot
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

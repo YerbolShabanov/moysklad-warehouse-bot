@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+state.json
+batch_state.json
+.DS_Store
