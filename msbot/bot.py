@@ -278,9 +278,11 @@ async def run() -> None:
 
     tasks = []
     if settings.notify_chat_id:
-        notifier = NewOrderNotifier(bot, client, service, settings)
+        # Порядок важен: notifier кладёт заказы в очередь batcher-а —
+        # ссылка нужна ему уже на старте.
+        batcher = PickingBatcher(bot, service, settings)
+        notifier = NewOrderNotifier(bot, client, service, settings, batcher)
         tasks.append(asyncio.create_task(notifier.start()))
-        batcher = PickingBatcher(bot, client, service, settings)
         tasks.append(asyncio.create_task(batcher.start()))
         log.info(
             "Оповещения о новых заказах: чат %s, опрос раз в %s c%s",

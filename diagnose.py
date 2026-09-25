@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 
+from msbot.batcher import PickingBatcher
 from msbot.config import load_settings
 from msbot.formatting import render_order
 from msbot.moysklad import MoySkladClient, MoySkladError
@@ -32,13 +33,16 @@ async def check_telegram(token: str) -> None:
 
 
 class DryRunBot:
-    """Заглушка вместо Telegram: копит сообщения вместо отправки."""
+    """Заглушка вместо Telegram: копит сообщения/файлы вместо отправки."""
 
     def __init__(self) -> None:
         self.sent = []
 
     async def send_message(self, chat_id, text, **kwargs) -> None:
-        self.sent.append(text)
+        self.sent.append(("сообщение", text))
+
+    async def send_document(self, chat_id, document, caption="", **kwargs) -> None:
+        self.sent.append(("файл " + getattr(document, "filename", "?"), caption))
 
 
 async def preview_notifications() -> None:
@@ -49,23 +53,31 @@ async def preview_notifications() -> None:
     bot = DryRunBot()
 
     with tempfile.TemporaryDirectory() as tmp:
+        batcher = PickingBatcher(
+            bot, service, settings,
+            state_path=str(Path(tmp) / "batch_state.json"),  # боевой state не трогаем
+        )
         notifier = NewOrderNotifier(
-            bot, client, service, settings,
-            state_path=str(Path(tmp) / "state.json"),  # боевой state не трогаем
+            bot, client, service, settings, batcher,
+            state_path=str(Path(tmp) / "state.json"),
         )
         print(f"Чат: {settings.notify_chat_id} · отсечка: {settings.notify_since}"
               f" · статусы: {', '.join(settings.notify_states) or 'все'}")
         print(f"Граница: {notifier.baseline()}\n")
         try:
             await notifier.start_once()
+            print(f"В очереди сводного листа после разбора: {len(batcher._queue)} заказов")
+            # Прогоняем один круг батчера — вдруг очередь уже достаточно набралась
+            await batcher.tick()
         finally:
             await client.aclose()
 
     if not bot.sent:
         print("Отправлять нечего: новых заказов за период нет.")
         return
-    print(f"Ушло бы сообщений: {len(bot.sent)}\n" + "-" * 60)
-    for text in bot.sent:
+    print(f"\nУшло бы: {len(bot.sent)}\n" + "-" * 60)
+    for kind, text in bot.sent:
+        print(f"[{kind}]")
         print(text)
         print("-" * 60)
 

@@ -70,7 +70,20 @@ class FakeBot:
         return "\n".join(t for _, t in self.sent)
 
 
-def make(tmp, client, bot, states=None, since="today", opt_states=None):
+class FakeBatcher:
+    """Ловит вызовы enqueue() — сам сводный лист тестируется в test_batch.py."""
+
+    def __init__(self):
+        self.enqueued = []
+
+    def enqueue(self, order):
+        self.enqueued.append(order)
+
+    def numbers(self):
+        return {o.get("name") for o in self.enqueued}
+
+
+def make(tmp, client, bot, states=None, since="today", opt_states=None, batcher=None):
     settings = Settings(
         telegram_token="t", moysklad_token="m",
         notify_chat_id=-100123, poll_interval=15,
@@ -79,6 +92,7 @@ def make(tmp, client, bot, states=None, since="today", opt_states=None):
     )
     return NewOrderNotifier(
         bot, client, OrderService(client, "Склад адрес. хранение"), settings,
+        batcher or FakeBatcher(),
         state_path=str(Path(tmp) / "state.json"),
     )
 
@@ -278,6 +292,10 @@ async def main():
 
         assert bot.numbers() == {"3002", "3003"}, bot.numbers()
         assert "3001" not in bot.text(), "заказ Kaspi ушёл поштучно вместо сводного листа"
+        # ...а вместо этого сразу попал в очередь сводного листа — не
+        # потерялся молча (в этом и была суть бага: раньше notifier просто
+        # забывал о таком заказе, ничего никому не передавая)
+        assert notifier._batcher.numbers() == {"3001"}, notifier._batcher.enqueued
         assert "ЭКСПРЕСС" in bot.text(), bot.text()
         assert "Собрать вне очереди" in bot.text(), bot.text()
         # пометка стоит только на экспрессе

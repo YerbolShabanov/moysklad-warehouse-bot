@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from aiogram import Bot
 
+from .batcher import PickingBatcher
 from .config import Settings
 from .delivery import send_card
 from .moysklad import MoySkladClient, MoySkladError
@@ -50,12 +51,14 @@ class NewOrderNotifier:
         client: MoySkladClient,
         service: OrderService,
         settings: Settings,
+        batcher: "PickingBatcher",
         state_path: Optional[str] = None,
     ) -> None:
         self._bot = bot
         self._client = client
         self._service = service
         self._settings = settings
+        self._batcher = batcher
         self._chat_id = settings.notify_chat_id
         self._interval = max(settings.poll_interval, 15)
         self._states = {s.strip().lower() for s in settings.notify_states if s.strip()}
@@ -238,8 +241,11 @@ class NewOrderNotifier:
                 order, self._settings.kaspi_channel, self._settings.express_attribute
             )
             if lane == routing.BATCH:
-                # Такие заказы копит сводный сборочный лист — поштучно не шлём.
-                log.info("Заказ %s уйдёт сводным листом", order.get("name"))
+                # Такие заказы копит сводный сборочный лист — поштучно не
+                # шлём, а сразу отдаём в очередь батчера. Важно сделать это
+                # здесь и сейчас: заказ может уйти из этого статуса быстрее,
+                # чем батчер успеет его снова увидеть отдельным опросом.
+                self._batcher.enqueue(order)
                 self._remember(key)
                 self._advance(updated)
                 continue
